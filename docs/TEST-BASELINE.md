@@ -40,3 +40,21 @@ These tests do not verify real OAuth accounts, a deployed D1 database, the Yande
 - Confirmation of the exact desired public room-code format (recommended: 8 uppercase characters from an ambiguity-free alphabet) and the actual gateway protocol contract.
 
 No production services, database migrations, or `main` branch files were changed during this review.
+
+
+## Additional static checks
+
+- `node --check` passed for all three Worker files.
+- `node --check` passed for all 16 executable inline JavaScript blocks in the HTML. Embedded license text and the JSON codec payload were correctly excluded from JavaScript parsing.
+- The available runtime was Node.js 22.16.0, not the Node.js 24 version requested by the archive, so the test suite should be repeated under Node.js 24 before accepting the checkpoint.
+
+## Important separation of systems
+
+- Cloudflare signaling is implemented in `worker-current-test.js`: `POST /api/room` creates an 8-character code from an ambiguity-free alphabet, and `/ws?room=...` routes signaling through a Durable Object.
+- The HTML's Yandex signaling option is a separate experimental adapter that connects directly to the Yandex API Gateway WebSocket URL and expects a `Y1.`-prefixed room value plus a per-connection capability token. The archive does not include that gateway's OpenAPI specification, Cloud Function source, or deployment configuration.
+- Yandex ID account login is a third, separate flow. It uses the Cloudflare account Worker for OAuth start/callback/exchange and requires HTTPS; it is not the Yandex multiplayer gateway.
+- The local-file account path uses the Cloudflare account API. Email/password requests are compatible with the Worker CORS policy in principle, but persistent login depends on the browser allowing localStorage. If storage is unavailable, the HTML falls back to in-memory storage and the session will not survive closing the tab.
+
+## Safe next step
+
+Do not change the Yandex adapter's room format or point it at the Cloudflare Worker without the Yandex gateway contract. Obtain the Yandex API Gateway OpenAPI export and the Cloud Function source (with secrets removed). Then implement and test the short-code contract on the server and client together. The Cloudflare path already has a separate short-code implementation in the Worker draft.
