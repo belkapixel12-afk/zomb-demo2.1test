@@ -1,59 +1,60 @@
-# Yandex signaling on YDB — implementation plan
+# Yandex signaling on YDB — test implementation
 
-Status: schema draft for isolated branch `test`. Not applied to YDB and not deployed.
+Status: handler and schema are prepared on isolated branch `test`. This is not a deployment confirmation. No production service or database was changed.
 
-## Scope and protocol
+## Client protocol
 
-This store is for the Yandex API Gateway WebSocket signaling function only. It does not replace the account database or persist player profiles. WebRTC media/game traffic remains peer-to-peer.
-
-The current Yandex client protocol remains:
+The archived game HTML uses:
 - host request: `{op:"host"}`
 - guest request: `{op:"join", room, name}`
 - signaling: `{op:"signal", cap, to, data}`
 - server events: `sig:ready`, `peer:join`, `signal`, `peer:left`, `err`
 
-The existing client currently expects a `Y1.` room token. Switching to the Cloudflare-compatible 8-character code requires a coordinated client change and must not be done by truncating a token. First implementation should preserve the existing `Y1.` client contract while introducing persistent room/peer state. A later client protocol migration can be done separately and tested.
+The handler preserves the `Y1.` prefix expected by the game and returns an eight-character code as `Y1.CODE`.
 
-## Tables
+## Files
 
-- `rooms`: one row per room; host connection, host capability hash, created/expiry timestamps, guest count, status.
-- `peers`: one row per participant keyed by (room_code, peer_id); API Gateway connection ID, role, display name, capability hash and timestamps.
+- `yandex-function/index.js`: YDB-backed API Gateway WebSocket handler.
+- `yandex-function/package.json`: Node.js 22+ package manifest with pinned SDK dependencies.
+- `db/ydb/001-signaling.sql`: schema matching `rooms` and `room_members` used by the handler.
 
-Only hashes of capabilities are stored. Raw capability tokens are returned to the relevant client and must never be logged or stored in YDB.
+Raw capability tokens are not stored in YDB. `SIGNAL_HMAC_KEY` must be configured only in the test function environment and never committed.
 
-TTL is configured for one hour after `expires_at_ms` to clean stale rows eventually. TTL is asynchronous; the function must reject expired rooms/peers immediately by comparing `expires_at_ms` with current time. Disconnect handling must explicitly delete rows and update room guest_count; TTL is only a backstop.
+## Behavior implemented
 
-## Required invariants
+1. CONNECT acknowledges the WebSocket connection.
+2. Host creates an eight-character room, stores the host and returns `sig:ready` with `Y1.CODE` and a signed capability.
+3. Guest joins, is stored in `room_members`, and triggers `peer:join` to the host using the API Gateway Connections REST endpoint.
+4. Signal relay validates capability, room membership, recipient role, payload size and restricts message types to offer/answer/candidate.
+5. DISCONNECT removes the participant; guest disconnect notifies host; host disconnect invalidates the room and notifies guests.
 
-1. One host per room.
-2. A guest can join only an existing, non-expired room with a connected host.
-3. Guest limit: 15 (matching the archived Cloudflare test Worker).
-4. Every operation validates the capability hash, room, role, expiry and target peer membership.
-5. Signaling payload types are restricted to offer, answer and candidate; enforce a conservative serialized message size limit and per-connection rate limit.
-6. A guest disconnect deletes that peer and notifies the host with `peer:left`.
-7. A host disconnect invalidates the room, notifies guests, and deletes room membership.
-8. Missing/delayed DISCONNECT events are handled by expiry checks and cleanup on join/host creation.
-9. Writes that change guest_count and peer membership must be transactional or use a conditional write strategy to avoid admitting more than 15 guests under concurrent joins.
-10. API Gateway connection IDs and operation-token context must come from the actual Yandex event shape, not guessed field names.
+## Blockers before live acceptance
 
-## Critical implementation constraint
+- The 15-guest limit is currently a read-then-insert check and can race under simultaneous joins. Do not treat it as race-proof. A transactional/conditional counter design is required before production acceptance.
+- The exact API Gateway operation-token location in Cloud Function context must be confirmed from real Gateway invocation logs/configuration. This source checks candidate paths but does not prove which one Yandex supplies.
+- Verify the Connections `:send` endpoint, body shape and IAM authorization against the deployed test Gateway.
+- DISCONNECT cleanup is best-effort. Expired rooms are rejected on join/signal; stale-row cleanup needs a scheduled/periodic strategy if disconnect events are lost.
+- STUN-only ICE can fail on restrictive mobile NAT. Successful signaling is not proof of WebRTC connectivity.
+- CREATE TABLE IF NOT EXISTS does not reconcile a table with a different existing schema. Inspect actual test DB table descriptions before applying SQL.
 
-The YDB schema alone does not make WebSocket fan-out reliable. The function must retain the exact Yandex API Gateway REST `:send` path and authorization behavior already proven in the current handler. Before replacing that handler, re-verify its deployed source and OpenAPI event mapping. The exported console page is not a source-code export.
+## Test configuration
 
-## Configuration
-
-The function environment needs:
+Required environment:
 - `YDB_ENDPOINT=grpcs://ydb.serverless.yandexcloud.net:2135`
-- `YDB_DATABASE=<exact database path from the YDB overview>`
-- metadata authentication enabled in the YDB SDK environment (`YDB_METADATA_CREDENTIALS=1`, if required by the selected SDK version)
+- `YDB_DATABASE=<test database path>`
+- `YDB_METADATA_CREDENTIALS=1` when required by selected runtime
+- `SIGNAL_HMAC_KEY=<secret configured in provider console>`
 
-Use the attached service account `zomb-signal-test` and its database-scoped `ydb.editor` grant. Never add service-account keys, IAM tokens, HMAC secrets or API keys to Git.
+Use only the dedicated `zomb-signal-test` service account and isolated test Gateway/function. Never commit IAM tokens, service-account keys, HMAC secrets or API keys.
 
-The YDB Node.js console example uses `ydb-sdk`, `Driver`, and `getCredentialsFromEnv()`. Confirm the SDK version and supported Node.js runtime before packaging the function. The current YDB documentation also describes the newer `@ydbjs/core` / `@ydbjs/query` SDK; do not mix APIs from the two SDK generations.
+## Acceptance sequence
 
-## Rollout boundary
+1. Deploy only to isolated test function and run read-only YDB health query.
+2. Confirm real CONNECT/MESSAGE/DISCONNECT event shapes.
+3. Verify host creation and room/member rows.
+4. Verify guest join and host receives peer:join.
+5. Verify offer/answer/candidate relay in both directions.
+6. Verify guest and host disconnect cleanup.
+7. Repeat on PC + Android and assess ICE separately.
 
-- This is an isolated draft on branch `test`.
-- Do not apply this SQL until the function code and schema have been reviewed together.
-- Do not edit `main`, production Cloudflare, the existing deployed Yandex function, or the API Gateway.
-- No live two-device or ICE success is claimed.
+No production rollout is authorized.
