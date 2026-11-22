@@ -1,33 +1,20 @@
--- ZOMB Yandex WebSocket signaling schema
--- Target: the dedicated Serverless YDB database "zomb-signaling".
--- Apply ONLY to the test database after reviewing this file.
--- The handler must still check expires_at_ms on every read; TTL deletion is asynchronous.
-
+-- ZOMB Yandex WebSocket signaling schema for the current index.js handler.
+-- Target: isolated test database only. Never apply to production.
+-- CREATE TABLE IF NOT EXISTS does not alter an existing table with another schema.
 CREATE TABLE IF NOT EXISTS rooms (
-    room_code Utf8 NOT NULL,
-    host_connection_id Utf8 NOT NULL,
-    host_cap_hash Utf8 NOT NULL,
-    created_at_ms Uint64 NOT NULL,
-    expires_at_ms Uint64 NOT NULL,
-    guest_count Uint32 NOT NULL,
-    status Utf8 NOT NULL,
+    room_code String NOT NULL,
+    host_connection_id String NOT NULL,
+    created_at Uint64 NOT NULL,
+    expires_at Uint64 NOT NULL,
+    status String NOT NULL,
     PRIMARY KEY (room_code)
-)
-WITH (
-    TTL = Interval("PT1H") ON expires_at_ms AS MILLISECONDS
 );
-
-CREATE TABLE IF NOT EXISTS peers (
-    room_code Utf8 NOT NULL,
-    peer_id Utf8 NOT NULL,
-    connection_id Utf8 NOT NULL,
-    role Utf8 NOT NULL,
-    display_name Utf8 NOT NULL,
-    cap_hash Utf8 NOT NULL,
-    created_at_ms Uint64 NOT NULL,
-    expires_at_ms Uint64 NOT NULL,
-    PRIMARY KEY (room_code, peer_id)
-)
-WITH (
-    TTL = Interval("PT1H") ON expires_at_ms AS MILLISECONDS
+CREATE TABLE IF NOT EXISTS room_members (
+    room_code String NOT NULL,
+    connection_id String NOT NULL,
+    role String NOT NULL,
+    display_name String NOT NULL,
+    joined_at Uint64 NOT NULL,
+    last_seen_at Uint64 NOT NULL,
+    PRIMARY KEY (room_code, connection_id)
 );
