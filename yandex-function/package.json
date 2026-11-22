@@ -1,0 +1,13 @@
+{
+  "name": "zomb-yandex-signaling-function",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Isolated Yandex Cloud Function YDB adapter for ZOMB signaling",
+  "main": "index.js",
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "ydb-sdk": "5.11.1"
+  }
+}
