@@ -1,5 +1,17 @@
 <!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ZOMB — загрузка</title></head>
 <body><p id="status">Загрузка тестовой версии ZOMB…</p><script>
-(async()=>{try{if(!('DecompressionStream' in window))throw new Error('Этот браузер не поддерживает загрузку игры. Обновите браузер.');const res=await fetch('./game.html.gz');if(!res.ok)throw new Error('Не удалось загрузить игру: '+res.status);const stream=res.body.pipeThrough(new DecompressionStream('gzip'));const html=await new Response(stream).text();document.open();document.write(html);document.close()}catch(e){document.getElementById('status').textContent='Ошибка загрузки: '+e.message}})();
+(async()=>{try{
+ if(!('DecompressionStream' in window))throw Error('Этот браузер не поддерживает загрузку игры. Обновите браузер.');
+ const res=await fetch('./game.html.gz');if(!res.ok)throw Error('Не удалось загрузить игру: '+res.status);
+ let html=await new Response(res.body.pipeThrough(new DecompressionStream('gzip'))).text();
+ const needle="let base;try{base=signalBaseUrl()}catch(e){NET.st=e.message;renderNet();return}", replacement="let base;try{base='https://zomb-signal.zomb-game.workers.dev'}catch(e){NET.st=e.message;renderNet();return}";
+ if(html.split(needle).length!==2)throw Error('Не совпадает версия игры: исправление сигнализации не применено');
+ html=html.replace(needle,replacement);
+ const start=html.indexOf("async function accYandex(action,username=''){"),end=html.indexOf('async function accYandexReturn(){',start);
+ if(start<0||end<0)throw Error('Не совпадает версия игры: исправление входа не применено');
+ html=html.slice(0,start)+"async function accYandex(action,username=''){\n if(location.protocol!=='https:')throw Error('Для входа через Яндекс открой опубликованную игру по HTTPS.');\n const popup=window.__zombOpenAuth('about:blank','_blank');\n if(!popup)throw Error('Разреши всплывающие окна для входа через Яндекс и попробуй снова.');\n try{\n  popup.opener=null;\n  const bytes=crypto.getRandomValues(new Uint8Array(32)),secret=btoa(String.fromCharCode(...bytes)).replace(/\\+/g,'-').replace(/\\//g,'_').replace(/=+$/,'');\n  const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(secret)),secretHash=btoa(String.fromCharCode(...new Uint8Array(digest))).replace(/\\+/g,'-').replace(/\\//g,'_').replace(/=+$/,'');\n  const d=await accApi('/api/auth/yandex/start',{method:'POST',body:JSON.stringify({action,username,secretHash})});\n  popup.location.href=d.url;\n  const deadline=Date.now()+9*60*1000;\n  while(Date.now()<deadline){\n   await new Promise(resolve=>setTimeout(resolve,3000));\n   const headers={'Content-Type':'application/json'};if(ACC.token)headers.Authorization='Bearer '+ACC.token;\n   const r=await fetch(accBase()+'/api/auth/yandex/exchange',{method:'POST',headers,body:JSON.stringify({state:d.state,secret})});\n   let result={};try{result=await r.json()}catch(_){}\n   if(r.status===409)continue;\n   if(!r.ok)throw Error(result.error||('Ошибка входа: HTTP '+r.status));\n   await accUse(result);toast('Вход через Яндекс выполнен');return;\n  }\n  throw Error('Время входа истекло. Попробуй снова.');\n }finally{try{popup.close()}catch(_){}}\n}\n"+html.slice(end);
+ window.__zombOpenAuth=window.open.bind(window);
+ document.open();document.write(html);document.close();
+}catch(e){document.getElementById('status').textContent='Ошибка загрузки: '+e.message}})();
 </script></body></html>
