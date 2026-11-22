@@ -1,0 +1,5 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ZOMB — загрузка</title></head>
+<body><p id="status">Загрузка тестовой версии ZOMB…</p><script>
+(async()=>{try{if(!('DecompressionStream' in window))throw new Error('Этот браузер не поддерживает загрузку игры. Обновите браузер.');const res=await fetch('./game.html.gz');if(!res.ok)throw new Error('Не удалось загрузить игру: '+res.status);const stream=res.body.pipeThrough(new DecompressionStream('gzip'));const html=await new Response(stream).text();document.open();document.write(html);document.close()}catch(e){document.getElementById('status').textContent='Ошибка загрузки: '+e.message}})();
+</script></body></html>
